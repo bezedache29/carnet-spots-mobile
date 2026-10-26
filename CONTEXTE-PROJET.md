@@ -49,11 +49,31 @@ Ce repo réplique localement les ressources exposées par `carnet-spots-api` pou
 
 ### 5.2 Données applicatives — SQLite local + file de mutations
 
+Le contrat côté API est déjà implémenté et documenté dans le README de `carnet-spots-api` (section 5.2) : c'est la référence en cas de doute.
+
 - Couche de stockage local (SQLite, ex. via `op-sqlite` ou équivalent compatible RN bare).
-- **Sync descendante** : au wifi avant le départ, les points pertinents (zone du road trip) sont téléchargés depuis l'API et stockés localement.
 - **Lecture/écriture 100% locale** sur le terrain — l'app ne dépend jamais du réseau pour fonctionner en mode consultation/mise à jour.
-- **File de mutations (mutation queue)** : chaque changement fait hors ligne (statut, note) est stocké localement avec horodatage, puis rejoué vers `carnet-spots-api` dès que le réseau est retrouvé.
-- Stratégie de conflit à définir précisément avant implémentation (probable : _last-write-wins_ horodaté, vu l'usage solo — pas de vrai risque de conflit concurrent multi-device en V1, mais à documenter explicitement dans le code).
+
+**Sync descendante** (`GET /api/v1/sync`) :
+
+- On télécharge **tous** les points et tags de l'utilisateur, pas seulement la zone du road trip : quelques centaines de points pèsent quelques Ko, et un point déplacé hors d'un filtre de zone n'arriverait jamais sur le téléphone.
+- Premier appel sans paramètre : tout est renvoyé. Les suivants envoient `since` = le `server_time` reçu à l'appel précédent, et ne reçoivent que ce qui a changé.
+- Réponse : `server_time`, `points`, `tags`, et `deleted.points` / `deleted.tags` (des `{id, uuid}` à supprimer localement). Un même élément peut revenir dans deux syncs successives : toujours appliquer en _upsert_.
+- Les points référencent leurs tags **par id** : garder les tags dans leur propre table, ne jamais copier le nom d'un tag dans un point. Pour un tag présent dans `deleted.tags`, le retirer soi-même des points locaux.
+
+**File de mutations** (rejeu au retour du réseau) :
+
+- Chaque changement fait hors ligne est mis en file, puis rejoué **un par un, dans l'ordre**, via les routes CRUD standard (`points`, `tags`). Un point qui utilise un tag créé hors ligne doit attendre la création de ce tag.
+- **Créations** : le téléphone génère un `uuid`. Rejouer une création déjà reçue renvoie l'élément existant (200) au lieu d'un doublon.
+- **Modifications** : envoyer `base_updated_at` = l'`updated_at` de la version modifiée sur le téléphone. Après chaque modification acceptée, remplacer `base_updated_at` dans **les autres changements en file du même élément** par le nouvel `updated_at` reçu, sinon la deuxième modification hors ligne d'un même point déclenche un faux conflit.
+- **Suppressions** : _soft delete_ côté API. Supprimer un élément déjà supprimé renvoie 204.
+- Que faire de chaque réponse :
+  - **2xx** : terminé, retirer de la file.
+  - **409** : conflit, l'élément a changé sur le serveur entre-temps. Rien n'est enregistré, la réponse contient la version actuelle : demander à l'utilisateur laquelle garder.
+  - **404** : l'élément a été supprimé sur le serveur, la suppression gagne. Abandonner le changement et supprimer l'élément local.
+  - **422** : le changement ne passera jamais tel quel (ex. nom de tag déjà pris). Le montrer à l'utilisateur pour qu'il le corrige ou l'abandonne. Les changements qui en dépendent attendent avec lui.
+  - **Erreur réseau / 5xx** : garder en file et réessayer plus tard.
+- Seules les dates du serveur sont comparées : l'horloge du téléphone n'a aucune importance.
 
 ## 6. Fonctionnalités attendues pour ce repo (roadmap V1)
 
@@ -61,7 +81,7 @@ Ce repo réplique localement les ressources exposées par `carnet-spots-api` pou
 - Ajout de point par tap sur la carte ou par position actuelle
 - Liste des points triée par distance
 - Consultation/mise à jour de statut **100% offline**
-- Sync avant départ (téléchargement points + `.pmtiles` de la zone)
+- Sync avant départ (téléchargement de tous les points + `.pmtiles` de la zone)
 - Rejeu de la file de mutations au retour du réseau
 
 ## 7. Hors scope V1 (à ne pas anticiper dans le code maintenant)
