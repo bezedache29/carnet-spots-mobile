@@ -32,7 +32,7 @@ Ce repo couvre la phase **terrain** (dans le fourgon, téléphone, souvent sans 
 
 Ce repo réplique localement les ressources exposées par `carnet-spots-api` pour permettre lecture/écriture offline :
 
-- **`points`** : `id`, `owner_id`, `title`, `latitude`, `longitude`, `note`, `status` (`a_tester` / `valide` / `a_eviter` / `deja_dormi`), `visited_at`, `visibility`
+- **`points`** : `id`, `owner_id`, `title`, `latitude`, `longitude`, `note`, `status` (`to_test` / `validated` / `to_avoid` / `already_slept`), `visited_at`, `visibility`
 - **`tags`** : `id`, `owner_id`, `name` (unique par owner)
 - **`point_tag`** : relation many-to-many
 - **`photos`** (V2, hors scope V1)
